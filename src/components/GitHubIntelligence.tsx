@@ -615,6 +615,26 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
   const [patInput, setPatInput] = useState('');
   const [showPat, setShowPat] = useState(false);
 
+  const [orgInput, setOrgInput] = useState('');
+  const [isSyncingOrg, setIsSyncingOrg] = useState(false);
+  const [orgErrorMsg, setOrgErrorMsg] = useState('');
+  const [orgSyncedRepos, setOrgSyncedRepos] = useState<Array<{
+    name: string;
+    fullName: string;
+    description: string;
+    visibility: string;
+    isPrivate: boolean;
+    defaultBranch: string;
+    htmlUrl: string;
+    stars: number;
+    forks: number;
+    openIssues: number;
+    sizeKb: number;
+    language: string | null;
+    updatedAt: string | null;
+  }> | null>(null);
+  const [orgSyncedName, setOrgSyncedName] = useState('');
+
   const [linkedRepoUrl, setLinkedRepoUrl] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [data, setData] = useState<IntelligencePayload | null>(null);
@@ -647,6 +667,7 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [reviewResult, setReviewResult] = useState<AiCodeReviewResult | null>(null);
+  const [pastReviewReports, setPastReviewReports] = useState<AiCodeReviewResult[]>([]);
   const [copiedReviewReport, setCopiedReviewReport] = useState(false);
   const reviewCacheRef = useRef<Map<string, AiCodeReviewResult>>(new Map());
   const reviewReqSeqRef = useRef(0);
@@ -714,6 +735,48 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
   const handleLinkSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     fetchIntelligence(repoUrlInput, patInput);
+  };
+
+  const handleOrgSync = async () => {
+    const trimmedOrg = orgInput.trim();
+    if (!trimmedOrg) {
+      setOrgErrorMsg('Please enter a GitHub organization or username.');
+      return;
+    }
+
+    setIsSyncingOrg(true);
+    setOrgErrorMsg('');
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      if (authToken) {
+        headers.Authorization = `Bearer ${authToken}`;
+      }
+
+      const res = await fetch('/api/github/org-sync', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({
+          org: trimmedOrg,
+          token: patInput.trim() || undefined,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to sync organization repositories (HTTP ${res.status})`);
+      }
+
+      setOrgSyncedRepos(payload.repositories || []);
+      setOrgSyncedName(payload.org || trimmedOrg);
+    } catch (err) {
+      setOrgErrorMsg(err instanceof Error ? err.message : 'Failed to sync organization repositories');
+    } finally {
+      setIsSyncingOrg(false);
+    }
   };
 
   const handleBranchChange = (nextBranch: string) => {
@@ -944,6 +1007,12 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
       const result = payload as AiCodeReviewResult;
       reviewCacheRef.current.set(cacheKey, result);
       setReviewResult(result);
+      setPastReviewReports((prev) => {
+        const filtered = prev.filter(
+          (r) => !(r.repoFullName === result.repoFullName && r.filePath === result.filePath && r.reviewType === result.reviewType)
+        );
+        return [result, ...filtered].slice(0, 30);
+      });
     } catch (err) {
       if (reqId !== reviewReqSeqRef.current) return;
       setReviewError(err instanceof Error ? err.message : 'Failed to run AI Code Review');
@@ -1226,6 +1295,290 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
             <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
             <span>{errorMsg}</span>
           </div>
+        )}
+      </section>
+
+      {/* Organization / User Mass-Sync Section */}
+      <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-emerald-950 dark:text-white flex items-center gap-2">
+              <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Mass Organization / User Repository Sync</span>
+            </h3>
+            <p className="text-xs text-emerald-800 dark:text-emerald-200/80 max-w-2xl leading-relaxed">
+              Sync all repositories from a specific GitHub organization or user handle at once for batch overview and quick repository selection.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 items-end">
+          <div className="flex-1 space-y-1.5 w-full">
+            <label htmlFor="gh-org-input" className="block text-xs font-medium text-emerald-900 dark:text-emerald-200">
+              GitHub Organization or Username
+            </label>
+            <div className="relative">
+              <Code2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400/70 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="gh-org-input"
+                type="text"
+                value={orgInput}
+                onChange={(e) => setOrgInput(e.target.value)}
+                placeholder="e.g. facebook, google, torvalds"
+                autoComplete="off"
+                className="w-full min-h-[42px] pl-9 pr-3 py-2 bg-emerald-50/70 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-700/80 rounded-xl text-xs text-emerald-950 dark:text-white placeholder-emerald-600/60 dark:placeholder-emerald-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-emerald-400"
+              />
+            </div>
+          </div>
+
+          <div className="shrink-0">
+            <button
+              type="button"
+              onClick={handleOrgSync}
+              disabled={isSyncingOrg || !orgInput.trim()}
+              className="w-full sm:w-auto min-h-[42px] px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-slate-950 font-bold text-xs flex items-center justify-center gap-2 whitespace-nowrap transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingOrg ? 'animate-spin' : ''}`} />
+              <span>{isSyncingOrg ? 'Syncing Repos...' : 'Sync Organization Repos'}</span>
+            </button>
+          </div>
+        </div>
+
+        {orgErrorMsg && (
+          <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-700 text-xs text-rose-800 dark:text-rose-200">
+            {orgErrorMsg}
+          </div>
+        )}
+
+        {orgSyncedRepos && orgSyncedRepos.length > 0 && (
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-950 dark:text-white">
+              <span>Synced Repositories ({orgSyncedRepos.length}) for <span className="font-mono text-emerald-700 dark:text-amber-300">@{orgSyncedName}</span></span>
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-400">Click any repo to load in Intelligence inspector</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
+              {orgSyncedRepos.map((r) => (
+                <div
+                  key={r.fullName}
+                  className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/60 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/60 flex flex-col justify-between gap-2 transition"
+                >
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <a
+                        href={r.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-bold text-emerald-950 dark:text-white hover:underline truncate"
+                      >
+                        {r.name}
+                      </a>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase shrink-0 ${
+                        r.isPrivate ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                      }`}>
+                        {r.visibility}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 dark:text-emerald-200/80 line-clamp-2">
+                      {r.description || 'No description provided.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-emerald-200/70 dark:border-emerald-800/60 text-[10px] text-emerald-700 dark:text-emerald-400">
+                    <div className="flex items-center gap-2 font-mono">
+                      {r.language && <span>{r.language}</span>}
+                      <span>⭐ {r.stars}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRepoUrlInput(r.htmlUrl);
+                        fetchIntelligence(r.htmlUrl, patInput);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-400 dark:hover:bg-emerald-300 dark:text-slate-950 font-bold text-[10px] inline-flex items-center gap-1 transition"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Inspect & Review</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* AI Code Review Summary & Top Vulnerable Repositories Section */}
+      <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-emerald-950 dark:text-white flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>AI Code Review Security & Performance Summary</span>
+            </h3>
+            <p className="text-xs text-emerald-800 dark:text-emerald-200/80 max-w-2xl leading-relaxed">
+              Aggregated Gemini AI audit scores across inspected repositories, identifying the top repositories requiring security attention based on critical & high severity findings.
+            </p>
+          </div>
+        </div>
+
+        {pastReviewReports.length === 0 ? (
+          <div className="py-8 px-4 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/50 text-center space-y-1">
+            <p className="text-xs font-semibold text-emerald-950 dark:text-white">No AI Code Reviews Recorded Yet</p>
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
+              Run performance or security code reviews on repository files in the inspector below to populate aggregated vulnerability metrics.
+            </p>
+          </div>
+        ) : (
+          (() => {
+            const avgScore = Math.round(
+              pastReviewReports.reduce((sum, r) => sum + (Number.isFinite(r.score) ? r.score : 0), 0) / pastReviewReports.length
+            );
+
+            // Group reviews by repoFullName to find top 3 with most critical/high findings
+            const repoMap = new Map<string, { repoFullName: string; totalReviews: number; criticalHighCount: number; lowestScore: number; reports: AiCodeReviewResult[] }>();
+            pastReviewReports.forEach((r) => {
+              const key = r.repoFullName || 'unknown/repo';
+              const cur = repoMap.get(key) || { repoFullName: key, totalReviews: 0, criticalHighCount: 0, lowestScore: 100, reports: [] };
+              cur.totalReviews += 1;
+              cur.lowestScore = Math.min(cur.lowestScore, r.score);
+              const critHigh = r.findings.filter((f) => f.severity === 'critical' || f.severity === 'high').length;
+              cur.criticalHighCount += critHigh;
+              cur.reports.push(r);
+              repoMap.set(key, cur);
+            });
+
+            const topVulnerableRepos = Array.from(repoMap.values())
+              .sort((a, b) => b.criticalHighCount - a.criticalHighCount || a.lowestScore - b.lowestScore)
+              .slice(0, 3);
+
+            return (
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Total Audited Files</span>
+                    <div className="text-xl font-black text-emerald-950 dark:text-white font-mono">{pastReviewReports.length}</div>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Average Audit Score</span>
+                    <div className="text-xl font-black text-emerald-950 dark:text-white font-mono">{avgScore} / 100</div>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800 space-y-1">
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Unique Repositories</span>
+                    <div className="text-xl font-black text-emerald-950 dark:text-white font-mono">{repoMap.size}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-emerald-200 dark:border-emerald-800/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-950 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Gauge className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <span>Repository Health &amp; Vulnerability Heatmap</span>
+                      </h4>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
+                        Visual color-coded health status across audited repositories (Green: Low Risk, Amber: Moderate, Red: Critical).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {topVulnerableRepos.map((item, idx) => (
+                      <div
+                        key={item.repoFullName}
+                        className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/55 dark:bg-rose-950/40 flex flex-col justify-between gap-3"
+                      >
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                              #{idx + 1} Risk
+                            </span>
+                            <span className="font-mono text-[11px] font-bold text-rose-800 dark:text-rose-200">
+                              Score: {item.lowestScore}
+                            </span>
+                          </div>
+                          <h5 className="text-xs font-extrabold text-emerald-950 dark:text-white truncate" title={item.repoFullName}>
+                            {item.repoFullName}
+                          </h5>
+                          <p className="text-[11px] text-rose-900/80 dark:text-rose-300/90 font-medium">
+                            {item.criticalHighCount} Critical / High security findings across {item.totalReviews} audited files.
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Heatmap Grid of All Audited Repositories */}
+                  <div className="space-y-2 pt-2">
+                    <span className="block text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                      Audited Repositories Heatmap ({repoMap.size})
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {Array.from(repoMap.values()).map((repoItem) => {
+                        const critCount = repoItem.criticalHighCount;
+                        const score = repoItem.lowestScore;
+                        const isCritical = critCount >= 2 || score < 65;
+                        const isModerate = (critCount === 1 || (score >= 65 && score < 85));
+                        
+                        const heatBg = isCritical
+                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-700/80 text-rose-950 dark:text-rose-100'
+                          : isModerate
+                          ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700/80 text-amber-950 dark:text-amber-100'
+                          : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700/80 text-emerald-950 dark:text-emerald-100';
+
+                        const badgeBg = isCritical
+                          ? 'bg-rose-500 text-white'
+                          : isModerate
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-emerald-600 text-white';
+
+                        const healthLabel = isCritical ? 'Critical Risk' : isModerate ? 'Moderate Risk' : 'Healthy / Low';
+
+                        return (
+                          <div
+                            key={repoItem.repoFullName}
+                            className={`p-3.5 rounded-xl border flex flex-col justify-between gap-3 shadow-xs transition ${heatBg}`}
+                          >
+                            <div className="space-y-1.5 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${badgeBg}`}>
+                                  {healthLabel}
+                                </span>
+                                <span className="font-mono text-[11px] font-bold tabular-nums">
+                                  Score: {score}
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-bold truncate" title={repoItem.repoFullName}>
+                                {repoItem.repoFullName}
+                              </h5>
+                              <div className="text-[10px] opacity-85 font-mono">
+                                {repoItem.totalReviews} audited files · {critCount} crit/high findings
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const repoWebUrl = `https://github.com/${repoItem.repoFullName}`;
+                                setRepoUrlInput(repoWebUrl);
+                                fetchIntelligence(repoWebUrl, patInput);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-white/90 dark:bg-emerald-900/90 border border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-white font-bold text-[10px] inline-flex items-center justify-center gap-1 hover:bg-white dark:hover:bg-emerald-800 transition shadow-2xs"
+                            >
+                              <Sparkles className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>Inspect Repository</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()
         )}
       </section>
 

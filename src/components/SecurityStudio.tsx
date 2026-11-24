@@ -219,7 +219,7 @@ const AUTO_DOCKER_DEFAULTS = [
 ];
 
 const KNOWN_KEY_DEFAULTS: MainKeysConfig = {
-  DATABASE_URL: '',
+  DATABASE_URL: 'postgresql://cc_postgres_5phu_user:p47zfB9OZHmpD6iLtTLSWFzTDmQBmjni@dpg-dc2jdgetlv9c738aggf0-a/cc_postgres_5phu',
   ADMIN_PHONE: '09361223978',
   ADMIN_PIN: '',
   APP_URL: 'https://chat-9-si9x.onrender.com',

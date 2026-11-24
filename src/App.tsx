@@ -1020,6 +1020,7 @@ export default function App() {
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [nameEditError, setNameEditError] = useState('');
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   const [forwardingTarget, setForwardingTarget] = useState<string | null>(null);
   const [forwardedTargets, setForwardedTargets] = useState<string[]>([]);
@@ -7723,33 +7724,52 @@ export default function App() {
                               </div>
                             )}
 
-                            <button
-                              type="button"
-                              onClick={() => openForwardDialog(m)}
-                              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border transition ${
-                                msgBgMode === 'black'
-                                  ? 'bg-neutral-900 hover:bg-neutral-800 text-white border-neutral-700'
-                                  : msgBgMode === 'white'
-                                  ? 'bg-slate-100 hover:bg-slate-200 text-black border-slate-300'
-                                  : theme.chatSecondaryBtn
-                              }`}
-                              title="Forward message to another user or room"
-                            >
-                              <Forward className="w-3 h-3" />
-                              <span>Forward</span>
-                            </button>
-
-                            {(currentUser && (m.senderId === currentUser.id || currentUser.role === 'admin' || currentUser.phone === '09361223978' || currentUser.phone === 'choycounterflow@gmail.com')) && (
+                            <div className="relative">
                               <button
                                 type="button"
-                                onClick={() => handleDeleteMessage(m)}
-                                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition"
-                                title="Delete message"
+                                onClick={() => setActiveMessageMenuId((prev) => (prev === m.id ? null : m.id))}
+                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border transition ${
+                                  msgBgMode === 'black'
+                                    ? 'bg-neutral-900 hover:bg-neutral-800 text-white border-neutral-700'
+                                    : msgBgMode === 'white'
+                                    ? 'bg-slate-100 hover:bg-slate-200 text-black border-slate-300'
+                                    : theme.chatSecondaryBtn
+                                }`}
+                                title="More options"
                               >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Delete</span>
+                                <span>···</span>
                               </button>
-                            )}
+
+                              {activeMessageMenuId === m.id && (
+                                <div className={`absolute bottom-full mb-1.5 z-20 flex flex-col p-1 rounded-xl ${theme.drawerAside} border shadow-lg min-w-[90px] ${m.isMe ? 'right-0' : 'left-0'}`}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      openForwardDialog(m);
+                                    }}
+                                    className="w-full text-left px-2.5 py-1 text-[11px] font-bold rounded hover:bg-emerald-500/20 flex items-center gap-1.5 transition"
+                                  >
+                                    <Forward className="w-3 h-3" />
+                                    <span>Forward</span>
+                                  </button>
+
+                                  {(currentUser && (m.senderId === currentUser.id || currentUser.role === 'admin' || currentUser.phone === '09361223978' || currentUser.phone === 'choycounterflow@gmail.com')) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveMessageMenuId(null);
+                                        handleDeleteMessage(m);
+                                      }}
+                                      className="w-full text-left px-2.5 py-1 text-[11px] font-bold rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 flex items-center gap-1.5 transition"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Delete</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>

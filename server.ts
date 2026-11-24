@@ -3653,3 +3653,172 @@ async function startServer() {
 }
 
 startServer();
+// 5d. Sync all repositories from a GitHub organization or user
+app.post('/api/github/org-sync', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const hasBearer = Boolean(req.headers.authorization?.startsWith('Bearer '));
+    if (!hasBearer) {
+      const origin = req.headers.origin;
+      const expectedHost = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim();
+      const hasRequestedWith = req.headers['x-requested-with'] === 'XMLHttpRequest';
+      let originMatches = false;
+      if (typeof origin === 'string' && expectedHost) {
+        try {
+          originMatches = new URL(origin).host === expectedHost;
+        } catch {
+          originMatches = false;
+        }
+      }
+      if (!originMatches && !hasRequestedWith) {
+        return res.status(403).json({ error: 'Cross-origin request blocked' });
+      }
+    }
+
+    const orgInput = typeof req.body?.org === 'string' ? req.body.org.trim() : '';
+    const userPat = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+
+    if (!orgInput || orgInput.length > 80 || !/^[a-zA-Z0-9_\-]+$/.test(orgInput)) {
+      return res.status(400).json({ error: 'Please provide a valid GitHub organization or username.' });
+    }
+
+    const effectiveToken = userPat || (process.env.GITHUB_TOKEN || '').trim();
+    const ghHeaders: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'ChoyChat-GitHub-Intelligence',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (effectiveToken) {
+      ghHeaders.Authorization = `Bearer ${effectiveToken}`;
+    }
+
+    // Try org endpoint first, fallback to user endpoint if 404 or empty
+    let reposUrl = `https://api.github.com/orgs/${encodeURIComponent(orgInput)}/repos?per_page=50&sort=updated`;
+    let orgRes = await fetch(reposUrl, { headers: ghHeaders });
+    
+    if (orgRes.status === 404) {
+      reposUrl = `https://api.github.com/users/${encodeURIComponent(orgInput)}/repos?per_page=50&sort=updated`;
+      orgRes = await fetch(reposUrl, { headers: ghHeaders });
+    }
+
+    const orgJson: any = orgRes.ok ? await orgRes.json().catch(() => []) : [];
+    if (!orgRes.ok) {
+      const ghMsg = typeof orgJson?.message === 'string' ? orgJson.message : 'GitHub API error';
+      if (orgRes.status === 401) {
+        return res.status(401).json({ error: 'GitHub rejected the personal access token.' });
+      }
+      if (orgRes.status === 404) {
+        return res.status(404).json({ error: `Organization or user "${orgInput}" not found on GitHub.` });
+      }
+      return res.status(orgRes.status).json({ error: ghMsg });
+    }
+
+    if (!Array.isArray(orgJson) || orgJson.length === 0) {
+      return res.json({ org: orgInput, repositories: [] });
+    }
+
+    const repositories = orgJson.map((r: any) => ({
+      name: String(r?.name || ''),
+      fullName: String(r?.full_name || ''),
+      description: typeof r?.description === 'string' ? r?.description : '',
+      visibility: typeof r?.visibility === 'string' ? r?.visibility : r?.private ? 'private' : 'public',
+      isPrivate: Boolean(r?.private),
+      defaultBranch: typeof r?.default_branch === 'string' ? r?.default_branch : 'main',
+      htmlUrl: r?.html_url || '',
+      stars: Number(r?.stargazers_count) || 0,
+      forks: Number(r?.forks_count) || 0,
+      openIssues: Number(r?.open_issues_count) || 0,
+      sizeKb: Number(r?.size) || 0,
+      language: typeof r?.language === 'string' ? r?.language : null,
+      updatedAt: typeof r?.updated_at === 'string' ? r?.updated_at : null,
+    }));
+
+    return res.json({
+      org: orgInput,
+      count: repositories.length,
+      repositories,
+    });
+  } catch (err: unknown) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to sync GitHub organization repositories',
+    });
+  }
+});
+// 5e. Export AI Code Review summary as a GitHub Issue
+app.post('/api/github/export-issue', requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const hasBearer = Boolean(req.headers.authorization?.startsWith('Bearer '));
+    if (!hasBearer) {
+      const origin = req.headers.origin;
+      const expectedHost = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim();
+      const hasRequestedWith = req.headers['x-requested-with'] === 'XMLHttpRequest';
+      let originMatches = false;
+      if (typeof origin === 'string' && expectedHost) {
+        try {
+          originMatches = new URL(origin).host === expectedHost;
+        } catch {
+          originMatches = false;
+        }
+      }
+      if (!originMatches && !hasRequestedWith) {
+        return res.status(403).json({ error: 'Cross-origin request blocked' });
+      }
+    }
+
+    const repoUrl = typeof req.body?.repoUrl === 'string' ? req.body.repoUrl : '';
+    const userPat = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const issueTitle = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : 'Choy Chat Security Audit';
+    const issueBody = typeof req.body?.body === 'string' ? req.body.body : '';
+
+    const parsedRepo = parseGitHubRepoInput(repoUrl);
+    if (!parsedRepo) {
+      return res.status(400).json({ error: 'Invalid GitHub repository URL.' });
+    }
+
+    const effectiveToken = userPat || (process.env.GITHUB_TOKEN || '').trim();
+    if (!effectiveToken) {
+      return res.status(401).json({
+        error: 'A GitHub Personal Access Token with repo (issues) write access is required to export issues.',
+      });
+    }
+
+    const ghHeaders: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${effectiveToken}`,
+      'User-Agent': 'ChoyChat-GitHub-Intelligence',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    };
+
+    const baseApi = `https://api.github.com/repos/${encodeURIComponent(parsedRepo.owner)}/${encodeURIComponent(parsedRepo.repo)}/issues`;
+    const issueRes = await fetch(baseApi, {
+      method: 'POST',
+      headers: ghHeaders,
+      body: JSON.stringify({
+        title: issueTitle,
+        body: issueBody,
+        labels: ['security', 'ai-review', 'choy-chat'],
+      }),
+    });
+
+    const issueJson: any = await issueRes.json().catch(() => ({}));
+    if (!issueRes.ok) {
+      const ghMsg = typeof issueJson?.message === 'string' ? issueJson.message : 'GitHub API error';
+      if (issueRes.status === 401 || issueRes.status === 403) {
+        return res.status(403).json({
+          error: 'GitHub denied issue creation. Ensure your Personal Access Token has "repo" (Full control of private repositories) or "public_repo" scope.',
+        });
+      }
+      return res.status(issueRes.status).json({ error: ghMsg });
+    }
+
+    return res.json({
+      success: true,
+      issueUrl: safeGitHubExternalUrl(issueJson?.html_url) || `https://github.com/${parsedRepo.owner}/${parsedRepo.repo}/issues`,
+      issueNumber: Number(issueJson?.number) || 0,
+    });
+  } catch (err: unknown) {
+    return res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to export issue to GitHub',
+    });
+  }
+});
