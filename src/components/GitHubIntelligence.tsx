@@ -33,6 +33,18 @@ import {
   AlertTriangle,
   Info,
 } from 'lucide-react';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  CartesianGrid,
+} from 'recharts';
 
 interface GitHubIntelligenceProps {
   authToken: string | null;
@@ -658,16 +670,83 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
   const [expandedCommitSha, setExpandedCommitSha] = useState<string | null>(null);
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<'files' | 'review' | 'structure' | 'commits' | 'readme'>('files');
+  const [activeIntelSubTab, setActiveIntelSubTab] = useState<'inspector' | 'org_sync' | 'heatmap' | 'insights'>('inspector');
+  const [pastReviewReports, setPastReviewReports] = useState<AiCodeReviewResult[]>([]);
+
+  const weeklyInsightsData = useMemo(() => {
+    const map = new Map<string, { weekLabel: string; totalScore: number; count: number; totalChars: number; sortKey: string }>();
+
+    pastReviewReports.forEach((r) => {
+      const d = new Date(r.generatedAt || Date.now());
+      if (Number.isNaN(d.getTime())) d.setTime(Date.now());
+      const year = d.getFullYear();
+      const firstJan = new Date(year, 0, 1);
+      const days = Math.floor((d.getTime() - firstJan.getTime()) / (24 * 60 * 60 * 1000));
+      const weekNum = Math.ceil((days + firstJan.getDay() + 1) / 7);
+      const key = `${year}-W${String(weekNum).padStart(2, '0')}`;
+      const weekLabel = `W${weekNum}, ${year}`;
+
+      const cur = map.get(key) || { weekLabel, totalScore: 0, count: 0, totalChars: 0, sortKey: key };
+      cur.totalScore += Number.isFinite(r.score) ? r.score : 75;
+      cur.count += 1;
+      cur.totalChars += r.analyzedChars || 1500;
+      map.set(key, cur);
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+      .map((item) => ({
+        week: item.weekLabel,
+        avgScore: Math.round(item.totalScore / item.count),
+        linesReviewed: Math.round(item.totalChars / 35),
+        reviewsCount: item.count,
+      }));
+  }, [pastReviewReports]);
   const [readmeViewMode, setReadmeViewMode] = useState<'preview' | 'raw'>('preview');
   const [readmeExpanded, setReadmeExpanded] = useState(false);
   const [copiedReadme, setCopiedReadme] = useState(false);
+  const [isSummarizingReadme, setIsSummarizingReadme] = useState(false);
+  const [readmeSummary, setReadmeSummary] = useState<string | null>(null);
+  const [readmeSummaryError, setReadmeSummaryError] = useState('');
+
+  const handleSummarizeReadme = async () => {
+    if (!data?.readme?.content || !data?.repo?.fullName) return;
+    setIsSummarizingReadme(true);
+    setReadmeSummaryError('');
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+      const res = await fetch('/api/github/readme-summary', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({
+          repoFullName: data.repo.fullName,
+          readmeContent: data.readme.content,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to generate README summary (HTTP ${res.status})`);
+      }
+      setReadmeSummary(payload.summary);
+    } catch (err) {
+      setReadmeSummaryError(err instanceof Error ? err.message : 'Failed to summarize README');
+    } finally {
+      setIsSummarizingReadme(false);
+    }
+  };
 
   const [reviewFocus, setReviewFocus] = useState<ReviewType>('security');
   const [reviewTargetPath, setReviewTargetPath] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [reviewResult, setReviewResult] = useState<AiCodeReviewResult | null>(null);
-  const [pastReviewReports, setPastReviewReports] = useState<AiCodeReviewResult[]>([]);
   const [copiedReviewReport, setCopiedReviewReport] = useState(false);
   const reviewCacheRef = useRef<Map<string, AiCodeReviewResult>>(new Map());
   const reviewReqSeqRef = useRef(0);
@@ -1298,7 +1377,60 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
         )}
       </section>
 
-      {/* Organization / User Mass-Sync Section */}
+      {/* Intelligence Sub-Tabs Navigation */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white dark:bg-emerald-900/50 p-1.5 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setActiveIntelSubTab('inspector')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+            activeIntelSubTab === 'inspector'
+              ? 'bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 shadow-xs'
+              : 'text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/60'
+          }`}
+        >
+          <FolderOpen className="w-4 h-4 shrink-0" />
+          <span>Inspector &amp; Review</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveIntelSubTab('org_sync')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+            activeIntelSubTab === 'org_sync'
+              ? 'bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 shadow-xs'
+              : 'text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/60'
+          }`}
+        >
+          <Globe className="w-4 h-4 shrink-0" />
+          <span>Org Sync</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveIntelSubTab('heatmap')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+            activeIntelSubTab === 'heatmap'
+              ? 'bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 shadow-xs'
+              : 'text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/60'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 shrink-0" />
+          <span>Security Heatmap</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveIntelSubTab('insights')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+            activeIntelSubTab === 'insights'
+              ? 'bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 shadow-xs'
+              : 'text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/60'
+          }`}
+        >
+          <Gauge className="w-4 h-4 shrink-0" />
+          <span>Insights &amp; Trends</span>
+        </button>
+      </div>
+
+      {/* SUB-TAB 1: ORG SYNC */}
+      {activeIntelSubTab === 'org_sync' && (
       <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="space-y-1">
@@ -1408,8 +1540,10 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
           </div>
         )}
       </section>
+      )}
 
-      {/* AI Code Review Summary & Top Vulnerable Repositories Section */}
+      {/* SUB-TAB 3: SECURITY HEATMAP */}
+      {activeIntelSubTab === 'heatmap' && (
       <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="space-y-1">
@@ -1581,8 +1715,105 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
           })()
         )}
       </section>
+      )}
 
-      {/* Loading Skeleton */}
+      {/* SUB-TAB 4: INSIGHTS & TRENDS (RECHARTS) */}
+      {activeIntelSubTab === 'insights' && (
+        <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-emerald-950 dark:text-white flex items-center gap-2">
+                <Gauge className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Code Review Insights &amp; Trends Over Time</span>
+              </h3>
+              <p className="text-xs text-emerald-800 dark:text-emerald-200/80 max-w-2xl leading-relaxed">
+                Weekly historical analytics of average Gemini AI code review scores and total lines of code reviewed.
+              </p>
+            </div>
+          </div>
+
+          {weeklyInsightsData.length === 0 ? (
+            <div className="py-12 px-4 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/50 text-center space-y-2">
+              <Gauge className="w-8 h-8 text-emerald-500/60 mx-auto" />
+              <p className="text-xs font-semibold text-emerald-950 dark:text-white">No Review Insights Data Yet</p>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80 max-w-md mx-auto">
+                Run security or performance code reviews on repository files in the Inspector tab to populate historical Recharts analytics.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Chart 1: Average Review Score Over Time */}
+              <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/60 space-y-3">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-950 dark:text-white">
+                  <span>Average Code Review Score by Week</span>
+                  <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400">Scale: 0 - 100</span>
+                </div>
+                <div className="w-full h-64 sm:h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={weeklyInsightsData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#10b98133" />
+                      <XAxis dataKey="week" stroke="#065f46" tick={{ fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} stroke="#065f46" tick={{ fontSize: 11 }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#022c22',
+                          borderColor: '#10b981',
+                          borderRadius: '12px',
+                          color: '#fff',
+                          fontSize: '11px',
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Line
+                        type="monotone"
+                        dataKey="avgScore"
+                        name="Avg Review Score"
+                        stroke="#10b981"
+                        strokeWidth={3}
+                        dot={{ r: 5, fill: '#34d399' }}
+                        activeDot={{ r: 7 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Chart 2: Total Lines of Code Reviewed per Week */}
+              <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/60 space-y-3">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-950 dark:text-white">
+                  <span>Total Lines of Code Reviewed by Week</span>
+                  <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400">Estimated LOC</span>
+                </div>
+                <div className="w-full h-64 sm:h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={weeklyInsightsData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#10b98133" />
+                      <XAxis dataKey="week" stroke="#065f46" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="#065f46" tick={{ fontSize: 11 }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#022c22',
+                          borderColor: '#10b981',
+                          borderRadius: '12px',
+                          color: '#fff',
+                          fontSize: '11px',
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Bar dataKey="linesReviewed" name="Lines Reviewed (LOC)" fill="#34d399" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* SUB-TAB 1: INSPECTOR & REVIEW */}
+      {activeIntelSubTab === 'inspector' && (
+      <>
+        {/* Loading Skeleton */}
       {isLoading && !data && (
         <div className="space-y-6 animate-pulse">
           <div className="bg-white dark:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/70 rounded-2xl p-6 space-y-4">
@@ -1646,7 +1877,7 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
 
       {/* Populated Intelligence Dashboard */}
       {data && (
-        <>
+        <div className="space-y-6">
           {/* Repository Overview & 4-Column Tabular KPI Strip */}
           <section className="bg-white dark:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -2777,6 +3008,17 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
 
               {data.readme && (
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isSummarizingReadme}
+                    onClick={handleSummarizeReadme}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-400 dark:hover:bg-emerald-300 dark:text-slate-950 text-[11px] font-bold inline-flex items-center gap-1.5 whitespace-nowrap transition disabled:opacity-50 shadow-xs"
+                    title="Scan README and generate setup instructions & project goals using Gemini"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isSummarizingReadme ? 'animate-spin' : ''}`} />
+                    <span>{isSummarizingReadme ? 'Summarizing...' : 'Summarize Setup & Goals'}</span>
+                  </button>
+
                   <div className="flex items-center gap-1 p-1 bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                     <button
                       type="button"
@@ -2837,6 +3079,44 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
               )}
             </div>
 
+            {readmeSummaryError && (
+              <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-700 text-xs text-rose-800 dark:text-rose-200">
+                {readmeSummaryError}
+              </div>
+            )}
+
+            {readmeSummary && (
+              <div className="p-4 rounded-2xl border border-amber-300 dark:border-amber-700/80 bg-amber-50/70 dark:bg-amber-950/40 space-y-3">
+                <div className="flex items-center justify-between gap-2 border-b border-amber-200 dark:border-amber-800/80 pb-2">
+                  <div className="flex items-center gap-2 font-bold text-xs text-amber-950 dark:text-amber-200">
+                    <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span>Gemini README Setup &amp; Goals Summary</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(readmeSummary).catch(() => {});
+                      }}
+                      className="px-2 py-1 rounded-lg bg-white dark:bg-emerald-900 border border-amber-300 dark:border-amber-700 text-[10px] font-bold text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-800 transition"
+                    >
+                      Copy Summary
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReadmeSummary(null)}
+                      className="text-amber-800 dark:text-amber-300 hover:text-amber-950 dark:hover:text-white font-bold px-1 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-emerald-950 dark:text-emerald-100 leading-relaxed whitespace-pre-wrap break-words font-sans">
+                  {readmeSummary}
+                </div>
+              </div>
+            )}
+
             {!data.readme ? (
               <div className="py-8 px-4 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/50 text-center space-y-1">
                 <p className="text-xs font-semibold text-emerald-950 dark:text-white">No README.md Found</p>
@@ -2884,7 +3164,9 @@ export const GitHubIntelligence: React.FC<GitHubIntelligenceProps> = ({ authToke
               </div>
             )}
           </section>
-        </>
+        </div>
+      )}
+      </>
       )}
     </div>
   );

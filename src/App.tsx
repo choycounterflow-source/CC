@@ -1000,11 +1000,73 @@ export default function App() {
   const [newLedgerName, setNewLedgerName] = useState('');
 
   const [isChoyAIPopupOpen, setIsChoyAIPopupOpen] = useState(false);
+  const [askChoyPos, setAskChoyPos] = useState<{ x: number; y: number } | null>(() => {
+    try {
+      const saved = localStorage.getItem('choychat_ask_choy_pos_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved) as { x?: unknown; y?: unknown };
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return { x: parsed.x, y: parsed.y };
+        }
+      }
+    } catch {}
+    return null;
+  });
+  const askChoyDragRef = useRef<{
+    active: boolean;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  }>({ active: false, pointerId: -1, startX: 0, startY: 0, originX: 0, originY: 0, moved: false });
+
+  const handleAskChoyPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture(e.pointerId);
+    const rect = target.getBoundingClientRect();
+    askChoyDragRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: askChoyPos ? askChoyPos.x : rect.left,
+      originY: askChoyPos ? askChoyPos.y : rect.top,
+      moved: false,
+    };
+  };
+
+  const handleAskChoyPointerMove = (e: React.PointerEvent) => {
+    if (!askChoyDragRef.current.active || e.pointerId !== askChoyDragRef.current.pointerId) return;
+    const dx = e.clientX - askChoyDragRef.current.startX;
+    const dy = e.clientY - askChoyDragRef.current.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      askChoyDragRef.current.moved = true;
+    }
+    const nextX = Math.max(8, Math.min(window.innerWidth - 80, askChoyDragRef.current.originX + dx));
+    const nextY = Math.max(8, Math.min(window.innerHeight - 90, askChoyDragRef.current.originY + dy));
+    const nextPos = { x: nextX, y: nextY };
+    setAskChoyPos(nextPos);
+    try {
+      localStorage.setItem('choychat_ask_choy_pos_v1', JSON.stringify(nextPos));
+    } catch {}
+  };
+
+  const handleAskChoyPointerUp = (e: React.PointerEvent) => {
+    if (!askChoyDragRef.current.active || e.pointerId !== askChoyDragRef.current.pointerId) return;
+    askChoyDragRef.current.active = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+  };
   const [shareCopied, setShareCopied] = useState(false);
   const [emojiLinks, setEmojiLinks] = useState<EmojiLinkItem[]>([]);
   const [activeEmojiLink, setActiveEmojiLink] = useState<EmojiLinkItem | null>(null);
   const [isAppIconShareModalOpen, setIsAppIconShareModalOpen] = useState(false);
   const [appIconShareNotice, setAppIconShareNotice] = useState('');
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [securitySyncTick, setSecuritySyncTick] = useState(0);
   const [deletingUserIds, setDeletingUserIds] = useState<string[]>([]);
   const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<string | null>(null);
@@ -5878,179 +5940,28 @@ export default function App() {
 
       {/* MAIN VIEW */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* TOP BAR — FULL-WIDTH DESIGNED CHOY CHAT BANNER */}
-        <header className={`relative z-30 flex flex-col px-3 sm:px-5 pt-3 pb-3 border-b ${theme.topHeaderBg} shrink-0 gap-2.5 transition-colors`}>
-          {/* Full-width edge-to-edge CHOY CHAT Hero Banner */}
-          <div className={`relative w-full overflow-hidden rounded-2xl border ${theme.heroCard} px-3 sm:px-6 py-2.5 sm:py-3.5 transition-colors`}>
-            {/* Soft ambient glow */}
-            <div className={`pointer-events-none absolute -top-10 left-1/4 w-48 h-24 rounded-full ${theme.heroGlowA} blur-2xl`}></div>
-            <div className={`pointer-events-none absolute -bottom-10 right-1/4 w-48 h-24 rounded-full ${theme.heroGlowB} blur-2xl`}></div>
-
-            {/* Ornamental Corner Accents */}
-            <span className={`pointer-events-none absolute top-1.5 left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 ${theme.heroCorner} rounded-tl-md`}></span>
-            <span className={`pointer-events-none absolute top-1.5 right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 ${theme.heroCorner} rounded-tr-md`}></span>
-            <span className={`pointer-events-none absolute bottom-1.5 left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 ${theme.heroCorner} rounded-bl-md`}></span>
-            <span className={`pointer-events-none absolute bottom-1.5 right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 ${theme.heroCorner} rounded-br-md`}></span>
-
-            <div className="relative z-10 w-full flex items-center justify-between gap-2 sm:gap-4">
-              {/* Left ornamental wing */}
-              <div className="hidden xs:flex sm:flex items-center gap-1.5 flex-1 min-w-[20px]">
-                <span className={`h-[2px] flex-1 bg-gradient-to-r ${theme.heroWingLeft}`}></span>
-                <span className={`w-2 h-2 rotate-45 ${theme.heroGem} shrink-0`}></span>
-              </div>
-
-              {/* Stretched Full-Width CHOY CHAT Wordmark */}
-              <h1 className={`flex-1 sm:flex-none text-center font-black uppercase leading-none select-none text-[clamp(1.65rem,7.2vw,3.4rem)] tracking-[0.18em] sm:tracking-[0.28em] md:tracking-[0.34em] bg-gradient-to-r ${theme.heroWordmark} bg-clip-text text-transparent whitespace-nowrap pl-[0.18em] sm:pl-[0.28em] md:pl-[0.34em]`}>
-                CHOY CHAT
-              </h1>
-
-              {/* Right ornamental wing */}
-              <div className="hidden xs:flex sm:flex items-center gap-1.5 flex-1 min-w-[20px]">
-                <span className={`w-2 h-2 rotate-45 ${theme.heroGem} shrink-0`}></span>
-                <span className={`h-[2px] flex-1 bg-gradient-to-l ${theme.heroWingRight}`}></span>
-              </div>
-            </div>
-
-            {/* Subtle bottom shimmer line */}
-            <div className={`relative z-10 mt-1.5 flex items-center justify-center gap-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.25em] ${theme.heroSubtitleRow}`}>
-              <span className={`h-px w-8 sm:w-16 bg-gradient-to-r from-transparent ${theme.heroSubtitleLineLeft}`}></span>
-              <span className="truncate">VIP Social • Live Cloud Sync</span>
-              <span className={`h-px w-8 sm:w-16 bg-gradient-to-l from-transparent ${theme.heroSubtitleLineRight}`}></span>
-            </div>
+        {/* TOP BAR — COMPACTED CHOY CHAT BANNER & 3-DOTS MENU BUTTON */}
+        <header className={`relative z-30 flex items-center justify-between px-3 sm:px-5 py-1.5 border-b ${theme.topHeaderBg} shrink-0 gap-2 transition-colors`}>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <h1 className={`font-black uppercase tracking-[0.2em] text-base sm:text-lg bg-gradient-to-r ${theme.heroWordmark} bg-clip-text text-transparent truncate`}>
+              CHOY CHAT
+            </h1>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 hidden sm:inline">
+              • VIP Social
+            </span>
           </div>
 
-          {/* Action & Search Row */}
-          <div className="flex items-center gap-2 w-full">
-            <button
-              type="button"
-              onClick={() => setIsAppIconShareModalOpen(true)}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-xl border transition shrink-0 shadow-xs ${theme.searchButton}`}
-              title="Share Emoji Link with App Icon Image"
-            >
-              <img
-                src={activeEmojiLink?.iconUrl || DEFAULT_AVATAR}
-                alt="App Icon"
-                className="w-6 h-7 rounded-md object-contain bg-slate-950 border border-white/30 shrink-0"
-              />
-              <span className="text-xs leading-none tracking-tight">
-                {activeEmojiLink?.emojiCode || '🔐🟢💬✨🚀'}
-              </span>
-            </button>
-            <div ref={searchContainerRef} className="relative flex-1 min-w-0 z-30">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none ${theme.searchIcon}`} />
-              <input
-                type="text"
-                placeholder="Search users, posts, chats..."
-                value={searchQuery}
-                onFocus={() => setIsSearchOpen(true)}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setIsSearchOpen(true);
-                }}
-                className={`w-full pl-9 pr-8 py-2 border rounded-xl text-xs focus:outline-none shadow-inner ${theme.searchInput}`}
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setIsSearchOpen(false);
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800 transition"
-                  aria-label="Clear search"
-                  title="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-
-              {/* Live Global User Search Dropdown */}
-              {isSearchOpen && normalizedSearch.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1.5 rounded-2xl bg-white dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-700 shadow-2xl overflow-hidden z-50">
-                  <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/80 border-b border-emerald-200 dark:border-emerald-800 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                    <span>People ({filteredUsers.length})</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveTab('people');
-                        setIsSearchOpen(false);
-                      }}
-                      className="text-emerald-800 dark:text-emerald-200 hover:underline normal-case font-semibold"
-                    >
-                      Open People Tab →
-                    </button>
-                  </div>
-
-                  {filteredUsers.length === 0 ? (
-                    <div className="p-3.5 text-center text-xs text-emerald-700 dark:text-emerald-300">
-                      No user found matching <span className="font-bold">"{searchQuery.trim()}"</span>.
-                    </div>
-                  ) : (
-                    <div className="max-h-64 overflow-y-auto divide-y divide-emerald-100 dark:divide-emerald-800/80">
-                      {filteredUsers.slice(0, 8).map((u) => {
-                        const isMe = u.id === currentUser.id;
-                        return (
-                          <div
-                            key={u.id}
-                            className="px-3 py-2 flex items-center justify-between gap-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/70 transition"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsSearchOpen(false);
-                                openUserProfile(u);
-                              }}
-                              className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
-                            >
-                              <img
-                                src={getUserAvatar(u)}
-                                alt=""
-                                className={`w-7 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-900 border border-emerald-500/50 shrink-0 ${
-                                  isCustomAvatar(getUserAvatar(u)) ? 'object-cover' : 'object-contain'
-                                }`}
-                              />
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-emerald-950 dark:text-white truncate">
-                                  {u.name} {isMe ? '(You)' : ''}
-                                </div>
-                                <div className="text-[10px] text-emerald-700 dark:text-emerald-300 truncate">
-                                  {u.role === 'admin' ? 'Admin' : 'Active Member'}
-                                  {(isAdmin || isMe) && u.phone && u.phone.toLowerCase() !== 'member'
-                                    ? ` · ${u.phone}`
-                                    : ''}
-                                </div>
-                              </div>
-                            </button>
-                            {!isMe && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsSearchOpen(false);
-                                  handleMessageUser(u.name);
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-[11px] font-bold shrink-0 transition"
-                              >
-                                Message
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setIsMenuDrawerOpen(true)}
-              className={`p-2.5 border rounded-xl transition shrink-0 shadow-xs ${theme.searchButton}`}
+              className={`p-2 border rounded-xl transition shadow-xs flex items-center gap-1.5 text-xs font-bold ${theme.searchButton}`}
               title="Open Menu & Settings"
               aria-label="Open Menu and Settings"
               aria-expanded={isMenuDrawerOpen}
             >
               <MoreVertical className="w-4 h-4" />
+              <span className="hidden xs:inline">Menu</span>
             </button>
           </div>
         </header>
@@ -8973,17 +8884,35 @@ export default function App() {
         </footer>
       </div>
 
-      {/* FLOATING CHOY AI POPUP WIDGET */}
-      <div className="fixed bottom-16 right-3 md:bottom-6 md:right-6 z-40">
+      {/* FLOATING ASK CHOY POPUP WIDGET (Draggable, Circular, Labeled) */}
+      <div
+        className="fixed z-40 select-none touch-none"
+        style={
+          askChoyPos
+            ? { left: askChoyPos.x, top: askChoyPos.y }
+            : { bottom: '24px', right: '24px' }
+        }
+      >
         {!isChoyAIPopupOpen && (
-          <button
-            type="button"
-            onClick={() => setIsChoyAIPopupOpen(true)}
-            className="w-12 h-14 md:w-14 md:h-16 bg-emerald-50 dark:bg-emerald-950 border-2 border-cyan-400 rounded-2xl shadow-2xl flex items-center justify-center font-bold hover:scale-105 overflow-hidden p-0.5 transition"
-            title="Ask Choy AI"
+          <div
+            onPointerDown={handleAskChoyPointerDown}
+            onPointerMove={handleAskChoyPointerMove}
+            onPointerUp={handleAskChoyPointerUp}
+            onClick={() => {
+              if (!askChoyDragRef.current.moved) {
+                setIsChoyAIPopupOpen(true);
+              }
+            }}
+            className="flex flex-col items-center cursor-pointer group"
+            title="Drag anywhere or tap to Ask Choy"
           >
-            <img src={DEFAULT_AVATAR} alt="" className="w-full h-full object-contain rounded-xl" />
-          </button>
+            <div className="w-12 h-12 md:w-14 md:h-14 bg-emerald-950 dark:bg-emerald-900 border-2 border-cyan-400 rounded-full shadow-2xl flex items-center justify-center overflow-hidden p-1 group-hover:scale-105 transition">
+              <img src={DEFAULT_AVATAR} alt="Ask Choy" className="w-full h-full object-cover rounded-full" />
+            </div>
+            <span className="mt-1 px-2 py-0.5 rounded-full bg-cyan-500 text-slate-950 font-black text-[9px] uppercase tracking-wider shadow-md whitespace-nowrap">
+              ASK CHOY
+            </span>
+          </div>
         )}
 
         {isChoyAIPopupOpen && (
@@ -9770,6 +9699,17 @@ export default function App() {
                   className="w-full px-3.5 py-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/70 border border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-200/80 dark:hover:bg-emerald-800 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition"
                 >
                   <PhoneCall className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" /> Test Video Call Ringtone
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuDrawerOpen(false);
+                    setIsPrivacyModalOpen(true);
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/70 border border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-200/80 dark:hover:bg-emerald-800 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" /> Privacy Policy &amp; Acknowledgments
                 </button>
 
                 {isAdmin && (
@@ -10631,6 +10571,94 @@ export default function App() {
                   Continue to Dashboard / Skip
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRIVACY POLICY & ACKNOWLEDGMENTS MODAL */}
+      {isPrivacyModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setIsPrivacyModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Privacy Policy and Acknowledgments"
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl bg-white dark:bg-emerald-950 border-2 border-emerald-400/70 p-6 shadow-2xl space-y-4 text-left my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-emerald-200 dark:border-emerald-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900 border border-emerald-300 dark:border-emerald-700 flex items-center justify-center text-emerald-700 dark:text-amber-300 shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-emerald-950 dark:text-white">
+                    Privacy Policy &amp; Acknowledgments
+                  </h3>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    Choy Chat Legal &amp; Data Guidelines
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPrivacyModalOpen(false)}
+                className="p-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-900 text-emerald-900 dark:text-white hover:bg-emerald-200 dark:hover:bg-emerald-800 transition"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 text-xs text-emerald-950 dark:text-emerald-100 leading-relaxed">
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-emerald-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <span>1. Information We Collect</span>
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-200/90">
+                  Choy Chat collects your display name, contact phone number, community messages, shared media attachments, ledger records, and GitHub Intelligence audit reports. This data is stored securely to ensure seamless community communication and real-time collaboration.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-emerald-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <span>2. Security &amp; Token Handling</span>
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-200/90">
+                  Personal Access Tokens (PAT) and GitHub credentials provided in GitHub Intelligence are held strictly in active session memory and proxied securely server-side. They are never permanently stored in public browser storage or databases without explicit admin configuration.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-emerald-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <span>3. AI &amp; Gemini Integration</span>
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-200/90">
+                  AI code reviews, README summaries, and Ask Choy assistant features are powered securely by Google Gemini API. Prompts and code excerpts sent for AI analysis are processed securely under standard API privacy protocols.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-emerald-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <span>4. Acknowledgments &amp; Open Source Tech</span>
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-200/90">
+                  Choy Chat is built using React, TypeScript, Tailwind CSS, Vite, Lucide Icons, Recharts, and WebRTC peer-to-peer communication. Special thanks to all community contributors, administrators, and testers.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsPrivacyModalOpen(false)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-400 dark:hover:bg-emerald-300 dark:text-slate-950 font-black text-xs transition shadow-sm"
+              >
+                I Understand &amp; Agree
+              </button>
             </div>
           </div>
         </div>

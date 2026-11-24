@@ -3582,6 +3582,37 @@ app.post('/api/github/generate-docs', async (req, res) => {
   }
 });
 
+// 8b. README AI Setup & Goals Summary Generator
+app.post('/api/github/readme-summary', async (req, res) => {
+  const { repoFullName, readmeContent } = req.body;
+  if (!readmeContent) {
+    return res.status(400).json({ error: 'README content is required' });
+  }
+
+  try {
+    const prompt = `Analyze the following README.md content for GitHub repository "${repoFullName || 'Repository'}". Generate a clear, structured summary covering:
+1. Project Goals & Core Purpose
+2. Setup & Installation Instructions
+3. Quick Start / Usage Guidelines
+4. Key Dependencies or Prerequisites
+
+Format using clean Markdown with bullet points.
+
+README Content:
+${String(readmeContent).slice(0, 40000)}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+    });
+
+    res.json({ summary: response.text });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 async function startServer() {
   const distPath = path.resolve(__dirname, 'dist');
   const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(distPath);
