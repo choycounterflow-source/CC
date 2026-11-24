@@ -24,4 +24,4 @@ ENV CACHE_MODE="lightweight-auto"
 
 EXPOSE 10000
 
-CMD ["node", "server.ts"]
+CMD ["node", "server.js"]
